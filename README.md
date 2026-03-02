@@ -16,7 +16,8 @@ This repo provides a more formal and detailed deployment guide than the official
 | `install_claude.ps1` | Enables Virtual Machine Platform, provisions the MSIX system-wide |
 | `detect_claude.ps1` | Detection script for Intune |
 | `uninstall_claude.ps1` | Removes and deprovisions Claude for all users |
-| `claude-desktop-intune-policy.json` | Intune custom configuration profile (OMA-URI) |
+| `create-intune-policy.ps1` | Creates the Intune configuration profile via Microsoft Graph |
+| `claude-desktop-intune-policy.json` | Settings reference (do not import via UI — use the script above) |
 
 ---
 
@@ -109,13 +110,21 @@ Start with a pilot group. Check install status under **Devices > Monitor > App i
 
 ## Step 5 — Deploy the registry policy
 
-This step applies the Claude enterprise settings (auto-updates, Cowork, extensions) via a separate Intune configuration profile. It does not require any PowerShell.
+This step applies the Claude enterprise settings (auto-updates, Cowork, extensions) by creating an Intune custom configuration profile via Microsoft Graph. Run the script from any machine with internet access and an Intune Administrator account:
 
-1. Go to **Devices > Configuration profiles > Create profile**
-2. Platform: **Windows 10 and later**
-3. Profile type: **Templates > Custom**
-4. Click **Import** and upload `claude-desktop-intune-policy.json`
-5. Review the settings, then assign to the same device group
+```powershell
+.\create-intune-policy.ps1
+```
+
+The script will:
+1. Install the `Microsoft.Graph` PowerShell module if not already present
+2. Open a browser to authenticate (requires Intune Administrator or Global Administrator role)
+3. Check whether the profile already exists and offer to update it if so
+4. Create the profile and print its ID
+
+After the script completes, go to **Devices > Configuration profiles** in the Intune admin centre, find **Claude Desktop - Enterprise Policy**, and assign it to the same device group used for the Win32 app.
+
+> **Note:** `claude-desktop-intune-policy.json` is kept in this repo as a reference for the settings, but the Intune portal JSON import (currently in preview) is unreliable — use the script above instead.
 
 The policy writes the following registry keys to `HKLM\SOFTWARE\Policies\Claude`:
 

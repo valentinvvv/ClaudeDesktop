@@ -8,6 +8,7 @@
       "displayName": "Claude - Disable Auto Updates",
       "description": "0 = auto-updates enabled",
       "omaUri": "./Device/Vendor/MSFT/Registry/HKLM/SOFTWARE/Policies/Claude/disableAutoUpdates",
+
       "value": 0
     },
     {
@@ -15,6 +16,7 @@
       "displayName": "Claude - Auto Updater Enforcement Hours",
       "description": "Max hours before Claude force-restarts to apply a pending update (1-72)",
       "omaUri": "./Device/Vendor/MSFT/Registry/HKLM/SOFTWARE/Policies/Claude/autoUpdaterEnforcementHours",
+
       "value": 72
     },
     {
@@ -22,6 +24,7 @@
       "displayName": "Claude - Enable Cowork (secureVmFeaturesEnabled)",
       "description": "1 = Cowork feature enabled. Requires Virtual Machine Platform to be active.",
       "omaUri": "./Device/Vendor/MSFT/Registry/HKLM/SOFTWARE/Policies/Claude/secureVmFeaturesEnabled",
+
       "value": 1
     },
     {
@@ -29,6 +32,7 @@
       "displayName": "Claude - Enable Desktop Extensions",
       "description": "1 = extensions enabled",
       "omaUri": "./Device/Vendor/MSFT/Registry/HKLM/SOFTWARE/Policies/Claude/isDesktopExtensionEnabled",
+
       "value": 1
     },
     {
@@ -36,6 +40,7 @@
       "displayName": "Claude - Enable Extension Directory",
       "description": "1 = extension directory access enabled",
       "omaUri": "./Device/Vendor/MSFT/Registry/HKLM/SOFTWARE/Policies/Claude/isDesktopExtensionDirectoryEnabled",
+
       "value": 1
     },
     {
@@ -43,6 +48,7 @@
       "displayName": "Claude - Enable Local Dev MCP",
       "description": "1 = local MCP servers enabled",
       "omaUri": "./Device/Vendor/MSFT/Registry/HKLM/SOFTWARE/Policies/Claude/isLocalDevMcpEnabled",
+
       "value": 1
     },
     {
@@ -50,6 +56,7 @@
       "displayName": "Claude - Enable Claude Code for Desktop",
       "description": "1 = Claude Code access enabled in desktop",
       "omaUri": "./Device/Vendor/MSFT/Registry/HKLM/SOFTWARE/Policies/Claude/isClaudeCodeForDesktopEnabled",
+
       "value": 1
     }
   ]
