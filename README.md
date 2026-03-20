@@ -229,9 +229,9 @@ Add the following custom return code so Intune retries gracefully when the prere
 
 #### Assignments tab
 
-Assign to a **device group**, not a user group. The MSIX is provisioned system-wide so device-based targeting is required.
+You can assign to either a **user group** or a **device group** — the install still runs as SYSTEM regardless of how it is targeted. User group targeting is fine and is how this was deployed in testing.
 
-Start with your pilot group. Check install status under **Devices > Monitor > App install status** before rolling out wider.
+Start with a pilot group. Check install status under **Devices > Monitor > App install status** before rolling out wider.
 
 ---
 
