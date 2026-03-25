@@ -34,7 +34,7 @@
       - Writes ClaudePrereqsReady.flag on first successful run (no reboot required, no failures).
     Changes v1.5:
       - CHECK 0b: Guest VM detection now requires integration services to be RUNNING, not just exist.
-        After enabling Hyper-V on a bare-metal host, vmicXXX services are created but stopped —
+        After enabling Hyper-V on a bare-metal host, vmicXXX services are created but stopped -
         previously this caused the host to be misidentified as a guest VM on the post-reboot cycle.
     Changes v1.4:
       - Removed FIX 3 (CoworkVMService), FIX 4 (WinNAT), FIX 5 (DNS)
@@ -298,7 +298,7 @@ if ($failures.Count -eq 0 -and -not $rebootRequired) {
             Out-File -FilePath $FlagFile -Encoding UTF8 -Force
         Write-Log "Prereqs flag written: $FlagFile"
     } else {
-        Write-Log "Prereqs flag already exists — not overwritten."
+        Write-Log "Prereqs flag already exists -- not overwritten."
     }
 }
 
