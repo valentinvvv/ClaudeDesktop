@@ -5,7 +5,7 @@
 .DESCRIPTION
     Checks for ClaudePrereqsReady.flag before installing.
     This flag is written by Detect-ClaudeCowork.ps1 (or Remediate-ClaudeCowork.ps1) once
-    Hyper-V features are enabled and all required services (vmms, vmcompute, HNS) are running.
+    Hyper-V features are enabled and all required services (vmcompute, HNS) are running.
 
     If the flag is absent the script exits 1 — Intune will retry on next check-in.
     Once the flag is present:

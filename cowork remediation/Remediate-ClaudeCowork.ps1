@@ -9,7 +9,7 @@
     Fixes applied:
       - Enables Virtual Machine Platform if missing (reports reboot required  -  does NOT force restart)
       - Enables full Hyper-V feature stack if missing (Microsoft-Hyper-V, -Services, -Hypervisor)
-      - Starts Hyper-V services (vmcompute, vmms) if stopped
+      - Starts Hyper-V service (vmcompute) if stopped
       - Starts HNS service if stopped
     Does NOT fix:
       - Firmware virtualisation disabled (BIOS/UEFI)  -  exits with clear message
@@ -24,10 +24,15 @@
                      EventID 1002 = remediation applied, EventID 1003 = remediation failed/partial.
       3. stdout     -  Structured key=value summary captured by Intune Remediations portal.
 .NOTES
-    Version:    1.6
+    Version:    1.7
     Date:       2026-03
     Author:     David Carroll - Jonas Software Australia
     Scope:      Windows 11 Pro, Claude Desktop MSIX, Intune-managed devices
+    Changes v1.7:
+      - FIX 2: Removed vmms from service checks. Cowork only requires vmcompute;
+        vmms (Hyper-V Manager stack) is not needed and was causing false positives
+        on working devices where vmcompute runs without vmms.
+      - GATE 0b: Use vmcompute (not vmms) as the signal for Hyper-V being present.
     Changes v1.6:
       - All logs and flag file moved to C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\Claude\
         so they are automatically collected by Intune > Collect diagnostics without any custom path setup.
@@ -108,21 +113,24 @@ try {
 # ===========================================================================
 # GATE CHECK 0b: Guest VM without nested virtualisation
 #
-# If this machine is a Hyper-V guest and vmms is absent, we first check whether
-# the Hyper-V features are merely Disabled (fixable by this script) vs truly
-# absent (parent host nested virt not exposed  -  unfixable by script).
+# If this machine is a Hyper-V guest and vmcompute is absent, we first check
+# whether the Hyper-V features are merely Disabled (fixable by this script) vs
+# truly absent (parent host nested virt not exposed  -  unfixable by script).
+#
+# Note: vmms (Hyper-V Manager stack) is NOT used as the signal here. Cowork
+# only needs vmcompute; vmms may be absent on working devices.
 # ===========================================================================
 Write-Log "--- GATE 0b: Guest VM / nested virtualisation"
 $guestIntegrationSvcs = @("vmicheartbeat","vmicshutdown","vmickvpexchange","vmicvss","vmicguestinterface")
-$isGuestVM   = $null -ne ($guestIntegrationSvcs | Where-Object { (Get-Service -Name $_ -ErrorAction SilentlyContinue).Status -eq "Running" })
-$vmmsPresent = $null -ne (Get-Service -Name "vmms" -ErrorAction SilentlyContinue)
+$isGuestVM        = $null -ne ($guestIntegrationSvcs | Where-Object { (Get-Service -Name $_ -ErrorAction SilentlyContinue).Status -eq "Running" })
+$vmcomputePresent = $null -ne (Get-Service -Name "vmcompute" -ErrorAction SilentlyContinue)
 
-if ($isGuestVM -and -not $vmmsPresent) {
+if ($isGuestVM -and -not $vmcomputePresent) {
     $hvFeatureState = (Get-WindowsOptionalFeature -Online -FeatureName "Microsoft-Hyper-V" -ErrorAction SilentlyContinue).State
     if ($hvFeatureState -eq "Disabled") {
-        Write-Log "INFO: Guest VM without vmms but Microsoft-Hyper-V is Disabled (not absent). Will attempt to re-enable features."
+        Write-Log "INFO: Guest VM without vmcompute but Microsoft-Hyper-V is Disabled (not absent). Will attempt to re-enable features."
     } else {
-        $msg = "GATE FAIL: Guest VM without nested virtualisation on $env:COMPUTERNAME. vmms absent and Hyper-V feature state is '$hvFeatureState'. Infrastructure fix required on parent host: Set-VMProcessor -VMName <VMName> -ExposeVirtualizationExtensions `$true. On Azure: resize to Dv3/Ev3 or higher SKU."
+        $msg = "GATE FAIL: Guest VM without nested virtualisation on $env:COMPUTERNAME. vmcompute absent and Hyper-V feature state is '$hvFeatureState'. Infrastructure fix required on parent host: Set-VMProcessor -VMName <VMName> -ExposeVirtualizationExtensions `$true. On Azure: resize to Dv3/Ev3 or higher SKU."
         Write-Log $msg "WARN"
         try {
             Write-EventLog -LogName $EventLog -Source $EventSource -EventId 1003 -EntryType Warning `
@@ -133,7 +141,7 @@ if ($isGuestVM -and -not $vmmsPresent) {
         Exit 1
     }
 } elseif ($isGuestVM) {
-    Write-Log "INFO: Guest VM detected, vmms present  -  nested virt enabled. Continuing."
+    Write-Log "INFO: Guest VM detected, vmcompute present  -  nested virt enabled. Continuing."
 } else {
     Write-Log "PASS: Bare-metal host."
 }
@@ -164,7 +172,7 @@ try {
 #
 # VirtualMachinePlatform alone is not sufficient. The working reference machine
 # has Microsoft-Hyper-V, -Services, and -Hypervisor all enabled. Without these,
-# vmms and vmcompute do not exist as services. Enabling Microsoft-Hyper-V-All
+# vmcompute does not exist as a service. Enabling Microsoft-Hyper-V-All
 # installs all sub-features in one pass. Reboot required.
 # ===========================================================================
 Write-Log "--- FIX 1b: Hyper-V feature stack"
@@ -195,11 +203,13 @@ foreach ($feat in $requiredHVFeatures) {
 }
 
 # ===========================================================================
-# FIX 2: Hyper-V services (vmcompute, vmms)
+# FIX 2: Hyper-V services (vmcompute)
 # Skip if features were just enabled above  -  services won't exist until reboot.
+# Note: vmms is NOT included. Cowork only needs vmcompute; vmms may be absent
+# on working devices and attempting to start it would cause spurious failures.
 # ===========================================================================
-Write-Log "--- FIX 2: Hyper-V services (vmcompute, vmms)"
-foreach ($svcName in @("vmcompute", "vmms")) {
+Write-Log "--- FIX 2: Hyper-V services (vmcompute)"
+foreach ($svcName in @("vmcompute")) {
     try {
         $svc = Get-Service -Name $svcName -ErrorAction Stop
         if ($svc.Status -ne "Running") {

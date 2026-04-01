@@ -134,26 +134,29 @@ try {
 # HypervisorPresent=True passes CHECK 0 regardless of whether this machine
 # is a bare-metal host or a guest VM. The distinguishing signal is:
 #   - Guest integration services present (vmicheartbeat etc.) = this is a guest
-#   - vmms absent = either nested virt not exposed by parent, OR Hyper-V features
+#   - vmcompute absent = either nested virt not exposed by parent, OR Hyper-V features
 #     were disabled on this guest (e.g. by Windows Update)
 #
 # We distinguish these by checking Hyper-V feature state:
 #   - Features Disabled = fixable by remediation (do not gate-exit)
-#   - Features absent/unknown + vmms missing = likely parent host issue (gate-exit)
+#   - Features absent/unknown + vmcompute missing = likely parent host issue (gate-exit)
+#
+# Note: vmms (Hyper-V Manager stack) is NOT checked here. Cowork only needs
+# vmcompute; vmms may be absent on working devices.
 # ===========================================================================
 Write-Log "--- CHECK 0b: Guest VM / nested virtualisation"
 $guestIntegrationSvcs = @("vmicheartbeat","vmicshutdown","vmickvpexchange","vmicvss","vmicguestinterface")
-$isGuestVM   = $null -ne ($guestIntegrationSvcs | Where-Object { (Get-Service -Name $_ -ErrorAction SilentlyContinue).Status -eq "Running" })
-$vmmsPresent = $null -ne (Get-Service -Name "vmms" -ErrorAction SilentlyContinue)
+$isGuestVM       = $null -ne ($guestIntegrationSvcs | Where-Object { (Get-Service -Name $_ -ErrorAction SilentlyContinue).Status -eq "Running" })
+$vmcomputePresent = $null -ne (Get-Service -Name "vmcompute" -ErrorAction SilentlyContinue)
 
-if ($isGuestVM -and -not $vmmsPresent) {
+if ($isGuestVM -and -not $vmcomputePresent) {
     # Check if Hyper-V features exist but are merely disabled (fixable) vs truly absent (parent host issue)
     $hvFeatureState = (Get-WindowsOptionalFeature -Online -FeatureName "Microsoft-Hyper-V" -ErrorAction SilentlyContinue).State
     if ($hvFeatureState -eq "Disabled") {
-        Write-Log "INFO: Guest VM without vmms but Microsoft-Hyper-V is Disabled (not absent). Features were likely disabled by a Windows Update. Remediation can re-enable them. Continuing checks."
+        Write-Log "INFO: Guest VM without vmcompute but Microsoft-Hyper-V is Disabled (not absent). Features were likely disabled by a Windows Update. Remediation can re-enable them. Continuing checks."
         $checks.Add("CHECK0b_NESTEDVIRT=WARN:GuestVMHyperVDisabled:RemediationCanFix")
     } else {
-        $msg = "This machine is a Hyper-V guest VM, vmms is absent, and Hyper-V features are not in a recoverable state (feature state: $hvFeatureState). Nested virt may not be exposed by the parent host. Parent host fix: Set-VMProcessor -VMName <VMName> -ExposeVirtualizationExtensions `$true. On Azure: resize to Dv3/Ev3 or higher SKU."
+        $msg = "This machine is a Hyper-V guest VM, vmcompute is absent, and Hyper-V features are not in a recoverable state (feature state: $hvFeatureState). Nested virt may not be exposed by the parent host. Parent host fix: Set-VMProcessor -VMName <VMName> -ExposeVirtualizationExtensions `$true. On Azure: resize to Dv3/Ev3 or higher SKU."
         Write-Log "FAIL: $msg" "WARN"
         $checks.Add("CHECK0b_NESTEDVIRT=FAIL:GuestVMNoNestedVirt")
         $checks.Add("REMAINING_CHECKS=SKIPPED:NestedVirtNotAvailable")
@@ -166,8 +169,8 @@ if ($isGuestVM -and -not $vmmsPresent) {
         Write-IntuneOutput -IssueCount $issues.Count -CheckResults $checks -IssueList $issues
         Exit 1
     }
-} elseif ($isGuestVM -and $vmmsPresent) {
-    Write-Log "INFO: Guest VM detected but vmms is present  -  nested virt is enabled. Continuing checks."
+} elseif ($isGuestVM -and $vmcomputePresent) {
+    Write-Log "INFO: Guest VM detected but vmcompute is present  -  nested virt is enabled. Continuing checks."
     $checks.Add("CHECK0b_NESTEDVIRT=PASS:GuestVMWithNestedVirt")
 } else {
     Write-Log "PASS: Bare-metal host (no guest integration services detected)"
@@ -228,10 +231,13 @@ foreach ($feat in $requiredHVFeatures) {
 }
 
 # ===========================================================================
-# CHECK 2: Hyper-V services (vmcompute, vmms)
+# CHECK 2: Hyper-V services (vmcompute)
+#
+# Only vmcompute is required for Cowork. vmms (Hyper-V Manager stack) is NOT
+# needed and may legitimately be absent on working devices.
 # ===========================================================================
-Write-Log "--- CHECK 2: Hyper-V services (vmcompute, vmms)"
-foreach ($svcName in @("vmcompute", "vmms")) {
+Write-Log "--- CHECK 2: Hyper-V services (vmcompute)"
+foreach ($svcName in @("vmcompute")) {
     try {
         $svc = Get-Service -Name $svcName -ErrorAction Stop
         if ($svc.Status -ne "Running") {
