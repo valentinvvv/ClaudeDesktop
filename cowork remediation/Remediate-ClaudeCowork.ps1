@@ -24,10 +24,23 @@
                      EventID 1002 = remediation applied, EventID 1003 = remediation failed/partial.
       3. stdout     -  Structured key=value summary captured by Intune Remediations portal.
 .NOTES
-    Version:    1.7
-    Date:       2026-03
+    Version:    1.8
+    Date:       2026-04
     Author:     David Carroll - Jonas Software Australia
     Scope:      Windows 11 Pro, Claude Desktop MSIX, Intune-managed devices
+    Changes v1.8:
+      - Added Show-RestartNotification helper. When Hyper-V features are enabled and a
+        reboot is required, the script now surfaces a message to the interactive user via
+        msg.exe instead of only logging it. Skips silently if nobody is logged on. A
+        once-per-boot sentinel (ClaudeCowork-RestartNotified.flag) prevents repeated
+        Intune install attempts from re-nagging the user until the next reboot.
+      - Resolves msg.exe via Sysnative when running 32-bit on 64-bit Windows (Intune IME
+        launches PowerShell as a 32-bit process; System32 is redirected to SysWOW64
+        which does not contain msg.exe, producing "is not recognized" errors).
+      - Added a scheduled-task WPF MessageBox fallback for environments where msg.exe
+        is absent or fails (e.g. Remote Desktop Services component stripped).
+      - Paired detection script reworked for Intune Win32 app custom detection; package
+        is now deployed as a Win32 app rather than a Proactive Remediation.
     Changes v1.7:
       - FIX 2: Removed vmms from service checks. Cowork only requires vmcompute;
         vmms (Hyper-V Manager stack) is not needed and was causing false positives
@@ -77,8 +90,98 @@ function Write-Log {
     "$ts [$Level] $Message" | Out-File -FilePath $LogFile -Append -Encoding UTF8
 }
 
+# Surface a restart-required prompt to the interactive user.
+# Runs from SYSTEM context (Intune IME launches PowerShell as a 32-bit process).
+#
+# Primary channel: msg.exe broadcasts a native message box to all active console sessions.
+#   Filesystem-redirection trap: on 64-bit Windows a 32-bit process sees
+#   C:\Windows\System32 redirected to C:\Windows\SysWOW64, which does NOT ship msg.exe.
+#   We resolve via C:\Windows\Sysnative (the 32-bit-process bypass alias) when running
+#   32-bit on 64-bit Windows; otherwise System32 directly.
+#
+# Fallback: one-shot scheduled task running as the interactive-user group (S-1-5-32-545)
+#   that shows a WPF MessageBox. Used when msg.exe is missing (e.g. SKUs without the
+#   Remote Desktop Services component) or returns an error.
+#
+# Guards: skips silently if no user is logged on, and uses a once-per-boot sentinel so
+# repeated Intune install attempts don't re-prompt until the machine has actually rebooted.
+function Show-RestartNotification {
+    param(
+        [string]$Title   = "Claude Cowork: restart required",
+        [string]$Message = "Claude Cowork enabled Hyper-V features on this PC. Please save your work and restart your computer at your earliest convenience to complete setup."
+    )
+
+    $activeUser = $null
+    try { $activeUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName } catch {}
+    if (-not $activeUser) {
+        Write-Log "Restart notification: no interactive user logged on; skipping."
+        return
+    }
+
+    $notifyFlag = "$LogDir\ClaudeCowork-RestartNotified.flag"
+    $bootId     = try { (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString("o") } catch { "unknown" }
+    if (Test-Path $notifyFlag) {
+        $prev = Get-Content $notifyFlag -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($prev -eq $bootId) {
+            Write-Log "Restart notification: already shown this boot ($bootId); skipping."
+            return
+        }
+    }
+
+    $shown = $false
+
+    # Resolve the real msg.exe path, honouring 32-bit SysWOW64 redirection on 64-bit Windows.
+    $msgExe = $null
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+        $candidates.Add("$env:windir\Sysnative\msg.exe")
+    }
+    $candidates.Add("$env:windir\System32\msg.exe")
+    foreach ($p in $candidates) {
+        if (Test-Path -LiteralPath $p) { $msgExe = $p; break }
+    }
+
+    if ($msgExe) {
+        try {
+            & $msgExe * /time:60 "$Title`n`n$Message" 2>&1 | Out-Null
+            Write-Log "Restart notification: delivered via $msgExe to session(s) for user '$activeUser'."
+            $shown = $true
+        } catch {
+            Write-Log "Restart notification: $msgExe invocation failed  -  $_. Falling back to scheduled-task WPF dialog." "WARN"
+        }
+    } else {
+        Write-Log "Restart notification: msg.exe not found in Sysnative or System32. Falling back to scheduled-task WPF dialog." "WARN"
+    }
+
+    if (-not $shown) {
+        try {
+            $taskName = "ClaudeCoworkRestartPrompt_$([Guid]::NewGuid().ToString('N'))"
+            $safeTitle   = $Title.Replace("'", "''")
+            $safeMessage = $Message.Replace("'", "''")
+            $inner = @"
+Add-Type -AssemblyName PresentationFramework
+[System.Windows.MessageBox]::Show('$safeMessage','$safeTitle','OK','Information') | Out-Null
+"@
+            $encoded   = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($inner))
+            $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"
+            $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(5)
+            $principal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Limited
+            $settings  = New-ScheduledTaskSettingsSet -DeleteExpiredTaskAfter (New-TimeSpan -Minutes 10) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+            Write-Log "Restart notification: scheduled-task fallback '$taskName' registered for user '$activeUser'."
+            $shown = $true
+        } catch {
+            Write-Log "Restart notification: scheduled-task fallback failed  -  $_" "WARN"
+        }
+    }
+
+    if ($shown) {
+        try { $bootId | Out-File -FilePath $notifyFlag -Encoding UTF8 -Force } catch {}
+    }
+}
+
 Write-Log "========================================="
-Write-Log "Claude Cowork remediation started (v1.6)"
+Write-Log "Claude Cowork remediation started (v1.8)"
 Write-Log "Host: $env:COMPUTERNAME | OS: $([System.Environment]::OSVersion.VersionString)"
 Write-Log "========================================="
 
@@ -297,6 +400,7 @@ if ($failures.Count -gt 0) {
 if ($rebootRequired) {
     Write-Log "REBOOT REQUIRED: Hyper-V features were enabled. A restart is needed before services will start. Schedule a restart via Intune or allow the next maintenance window." "WARN"
     Write-Host "REBOOT=REQUIRED:HyperVFeaturesEnabled:RestartNotForced"
+    Show-RestartNotification
 }
 
 # ===========================================================================
